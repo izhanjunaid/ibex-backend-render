@@ -1,0 +1,49 @@
+services:
+  # Backend API Service
+  - type: web
+    name: ibex-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: FROM_EMAIL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: LOCAL_STORAGE_ENABLED
+        value: false
+      - key: SMALL_FILE_THRESHOLD
+        value: 2097152
+      - key: MEDIUM_FILE_THRESHOLD
+        value: 52428800
+      - key: LARGE_FILE_THRESHOLD
+        value: 104857600
+      - key: MAX_FILE_SIZE
+        value: 209715200
+      - key: ALLOWED_FILE_TYPES
+        value: jpg,jpeg,png,gif,pdf,doc,docx,ppt,pptx,xls,xlsx,mp4,avi,mov,zip,rar 
