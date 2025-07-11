@@ -30,13 +30,13 @@ async function sendInvitationEmail(email, role, acceptUrl, invitedBy) {
   const emailTemplate = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-        <h1 style="margin: 0; font-size: 28px;">🎓 Welcome to EduCore!</h1>
+        <h1 style="margin: 0; font-size: 28px;">🎓 Welcome to Ibex Classroom!</h1>
         <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">You've been invited to join our educational platform</p>
       </div>
       <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
         <h2 style="color: #333; margin-top: 0;">You're Invited as a ${role.charAt(0).toUpperCase() + role.slice(1)}!</h2>
         <p style="color: #666; font-size: 16px; line-height: 1.6;">
-          ${invitedBy} has invited you to join EduCore as a <strong>${role}</strong>. 
+          ${invitedBy} has invited you to join ibex as a <strong>${role}</strong>. 
           Click the button below to accept your invitation and create your account with your Google account.
         </p>
         <div style="text-align: center; margin: 30px 0;">
@@ -63,7 +63,7 @@ async function sendInvitationEmail(email, role, acceptUrl, invitedBy) {
         </p>
       </div>
       <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
-        <p>© 2025 EduCore - Educational Management System</p>
+        <p>© 2025 ibex - Educational Management System</p>
         <p>Powered by Gmail</p>
       </div>
     </div>
