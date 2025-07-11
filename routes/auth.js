@@ -2,26 +2,30 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 const router = express.Router();
 const { supabaseAdmin } = require('../lib/supabase');
 
-// Email sending function using Resend (transactional email service)
+// Email sending function using Gmail (nodemailer)
 async function sendInvitationEmail(email, role, acceptUrl, invitedBy) {
   // Debug environment variables
   console.log('📧 Email Config Debug:');
-  console.log('- RESEND_API_KEY:', process.env.RESEND_API_KEY ? '✅ Set (length: ' + process.env.RESEND_API_KEY.length + ')' : '❌ Missing');
+  console.log('- GMAIL_USER:', process.env.GMAIL_USER ? '✅ Set' : '❌ Missing');
+  console.log('- GMAIL_PASS:', process.env.GMAIL_PASS ? '✅ Set' : '❌ Missing');
   console.log('- FROM_EMAIL:', process.env.FROM_EMAIL ? '✅ Set' : '❌ Missing');
 
-  // Validate required environment variables
-  if (!process.env.RESEND_API_KEY) {
-    throw new Error('Resend API key not configured. Please set RESEND_API_KEY in your .env file. Get your free API key at https://resend.com');
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
+    throw new Error('Gmail credentials not configured. Please set GMAIL_USER and GMAIL_PASS in your .env file.');
   }
-  
-  // Initialize Resend client
-  console.log('🔧 Creating Resend client...');
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  console.log('✅ Resend client initialized!');
+
+  // Create a transporter using Gmail
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_PASS
+    }
+  });
 
   const emailTemplate = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -29,21 +33,17 @@ async function sendInvitationEmail(email, role, acceptUrl, invitedBy) {
         <h1 style="margin: 0; font-size: 28px;">🎓 Welcome to EduCore!</h1>
         <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">You've been invited to join our educational platform</p>
       </div>
-      
       <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
         <h2 style="color: #333; margin-top: 0;">You're Invited as a ${role.charAt(0).toUpperCase() + role.slice(1)}!</h2>
-        
         <p style="color: #666; font-size: 16px; line-height: 1.6;">
           ${invitedBy} has invited you to join EduCore as a <strong>${role}</strong>. 
           Click the button below to accept your invitation and create your account with your Google account.
         </p>
-        
         <div style="text-align: center; margin: 30px 0;">
           <a href="${acceptUrl}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 16px; display: inline-block;">
             🚀 Accept Invitation & Join with Google
           </a>
         </div>
-        
         <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
           <h3 style="margin: 0 0 10px 0; color: #333; font-size: 16px;">📧 Your Gmail: ${email}</h3>
           <p style="margin: 0; color: #666; font-size: 14px;">
@@ -53,44 +53,32 @@ async function sendInvitationEmail(email, role, acceptUrl, invitedBy) {
             ${acceptUrl}
           </p>
         </div>
-        
         <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; border-left: 4px solid #2196f3;">
           <p style="margin: 0; color: #1976d2; font-size: 14px;">
             <strong>🔐 Easy Signup:</strong> You'll sign in with your existing Google account - no new passwords to remember!
           </p>
         </div>
-        
         <p style="color: #999; font-size: 14px; margin: 20px 0 0 0;">
           This invitation expires in 7 days. If you didn't expect this invitation, you can safely ignore this email.
         </p>
       </div>
-      
       <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
         <p>© 2025 EduCore - Educational Management System</p>
-        <p>Powered by Resend</p>
+        <p>Powered by Gmail</p>
       </div>
     </div>
   `;
 
-  // Send email using Resend
-  console.log('📤 Sending email via Resend...');
-  
-  const emailData = {
-    from: process.env.FROM_EMAIL || 'EduCore <onboarding@resend.dev>',
-    to: [email],
+  const mailOptions = {
+    from: process.env.FROM_EMAIL || 'Your Name <your@gmail.com>',
+    to: email,
     subject: `🎓 You're invited to join EduCore as a ${role}!`,
     html: emailTemplate,
   };
 
-  const { data, error } = await resend.emails.send(emailData);
-  
-  if (error) {
-    console.error('❌ Resend error:', error);
-    throw new Error(`Failed to send email: ${error.message}`);
-  }
-  
-  console.log('✅ Email sent successfully via Resend!', data);
-  return data;
+  const info = await transporter.sendMail(mailOptions);
+  console.log('✅ Email sent via Gmail:', info.messageId);
+  return info;
 }
 
 // Login endpoint
@@ -488,7 +476,8 @@ router.post('/admin/send-invite', authenticateToken, async (req, res) => {
     }
 
     // Email sending functionality
-    const acceptUrl = `http://localhost:3000/accept-invite?token=${invite.token}`;
+    const frontendUrl = process.env.CLIENT_URL || "http://localhost:3000";
+    const acceptUrl = `${frontendUrl}/accept-invite?token=${invite.token}`;
     
     // Try to send email (if configured)
     let emailSent = false;
@@ -978,8 +967,8 @@ router.post('/test-email', authenticateToken, async (req, res) => {
     
     console.log('🧪 Testing email sending...');
     console.log('📧 Environment Variables Check:');
-    console.log('- RESEND_EMAIL:', process.env.RESEND_EMAIL ? 'Set ✅' : 'Missing ❌');
-    console.log('- RESEND_API_KEY:', process.env.RESEND_API_KEY ? `Set ✅ (${process.env.RESEND_API_KEY.length} chars)` : 'Missing ❌');
+    console.log('- GMAIL_USER:', process.env.GMAIL_USER ? 'Set ✅' : 'Missing ❌');
+    console.log('- GMAIL_PASS:', process.env.GMAIL_PASS ? 'Set ✅' : 'Missing ❌');
     console.log('- FROM_EMAIL:', process.env.FROM_EMAIL || 'Using default');
 
     await sendInvitationEmail(testEmail, 'student', testUrl, req.user.email);
