@@ -66,9 +66,9 @@ app.use(cors({
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
     "http://127.0.0.1:3002",
-    // Vercel frontend URLs (will be updated after deployment)
-    "https://*.vercel.app",
-    "https://*.vercel.app/*"
+    "https://v0-ibex-frontend-development.vercel.app",
+    "https://v0-ibex-frontend-development-git-main-izhanjunaids-projects.vercel.app",
+    "https://v0-ibex-frontend-development-nxgsilwwv7-izhanjunaids-projects.vercel.app"
   ],
   credentials: true
 }));
