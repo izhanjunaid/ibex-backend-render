@@ -3,7 +3,7 @@ const multer = require('multer');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
 const { supabaseAdmin } = require('../lib/supabase');
-const hybridStorage = require('../lib/hybrid-storage');
+const cdnStorage = require('../lib/cdn-storage');
 
 // Middleware to inject Supabase client
 router.use((req, res, next) => {
@@ -132,7 +132,7 @@ router.post('/', authenticateToken, upload.array('attachments', 5), async (req, 
     if (req.files && req.files.length) {
       for (const file of req.files) {
         try {
-          const uploadRes = await hybridStorage.uploadFile(file, {
+          const uploadRes = await cdnStorage.uploadFile(file, {
             userId: user.id,
             folder: `announcements/${schoolId || 'general'}`,
             relatedTable: 'announcements',

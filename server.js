@@ -52,7 +52,7 @@ app.use(compression());
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 500 // limit each IP to 500 requests per windowMs (increased from 100)
 });
 app.use('/api/', limiter);
 
@@ -219,19 +219,7 @@ if (DEMO_MODE) {
     ]);
   });
 
-  app.get('/api/attendance', (req, res) => {
-    res.json([
-      {
-        id: 'demo-attendance-1',
-        student_id: 'demo-student-1',
-        class_id: 'demo-class-1',
-        date: new Date().toISOString().split('T')[0],
-        status: 'present',
-        marked_by: 'demo-teacher-1',
-        created_at: new Date().toISOString()
-      }
-    ]);
-  });
+
 
   app.get('/api/grades', (req, res) => {
     res.json([
@@ -281,6 +269,10 @@ if (DEMO_MODE) {
   // Mount full assignments router (create, list by class, etc.)
   app.use('/api/assignments', require('./routes/assignments'));
   
+  // NEW: Grade Section Homework System (Additive Feature)
+  app.use('/api/grade-sections', require('./routes/grade-sections'));
+  app.use('/api/homework', require('./routes/homework'));
+  
   // Add admin overview endpoint
   app.get('/api/admin/overview', async (req, res) => {
     try {
@@ -298,7 +290,7 @@ if (DEMO_MODE) {
           totalTeachers,
           totalClasses,
           totalStaff: totalTeachers + 1, // Include admin
-          averageAttendance: 94.2,
+          averageAttendance: 0,
           academicPerformance: 87.5,
           collectionRate: 93.2,
           activeAlerts: 1,
@@ -326,7 +318,7 @@ if (DEMO_MODE) {
   // app.use('/api/assignments', require('./routes/assignments'));
   app.use('/api/submissions', require('./routes/submissions'));
   // app.use('/api/grades', require('./routes/grades'));
-  // app.use('/api/attendance', require('./routes/attendance'));
+
   // General announcements endpoint for dashboard
   app.get('/api/announcements', async (req, res) => {
     try {
@@ -359,6 +351,8 @@ if (DEMO_MODE) {
   
   app.use('/api/announcements', require('./routes/announcements'));
   app.use('/api/comments', require('./routes/comments'));
+  app.use('/api/attendance', require('./routes/attendance'));
+app.use('/api/notifications', require('./routes/notifications'));
   
   // Dashboard stats endpoint
   app.get('/api/dashboard/stats', async (req, res) => {

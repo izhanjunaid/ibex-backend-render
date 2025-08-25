@@ -4,9 +4,9 @@ const router = express.Router();
 
 const { authenticateToken } = require('../middleware/auth');
 const { supabaseAdmin } = require('../lib/supabase');
-const hybridStorage = require('../lib/hybrid-storage');
+const cdnStorage = require('../lib/cdn-storage');
 
-// Multer config – keep files in memory (upload to hybrid storage afterwards)
+// Multer config – keep files in memory (upload to CDN storage afterwards)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -66,7 +66,7 @@ router.post('/', authenticateToken, upload.array('files', 10), async (req, res) 
     if (req.files && req.files.length) {
       for (const file of req.files) {
         try {
-          const uploadRes = await hybridStorage.uploadFile(file, {
+          const uploadRes = await cdnStorage.uploadFile(file, {
             userId: user.id,
             folder: `submissions/${assignmentId}/${user.id}`,
             relatedTable: 'assignment_submissions',

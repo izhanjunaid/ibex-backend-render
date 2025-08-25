@@ -433,12 +433,12 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     // Delete files from storage after successful database cleanup
     if (filesToDelete && filesToDelete.length > 0) {
-      const hybridStorage = require('../lib/hybrid-storage');
+      const cdnStorage = require('../lib/cdn-storage');
       let storageDeletionErrors = [];
 
       for (const file of filesToDelete) {
         try {
-          await hybridStorage.deleteFile(file.file_path, file.storage_provider, file.bucket);
+          await cdnStorage.deleteFile(file.file_path, file.storage_provider, file.bucket);
         } catch (storageError) {
           console.error(`Failed to delete file ${file.id} from storage:`, storageError);
           storageDeletionErrors.push({

@@ -279,7 +279,7 @@ export interface Database {
       attendance: {
         Row: {
           id: string
-          class_id: string | null
+          grade_section_id: string | null
           student_id: string | null
           date: string
           status: 'present' | 'absent' | 'late' | 'excused'
@@ -290,7 +290,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          class_id?: string | null
+          grade_section_id?: string | null
           student_id?: string | null
           date: string
           status: 'present' | 'absent' | 'late' | 'excused'
@@ -301,7 +301,7 @@ export interface Database {
         }
         Update: {
           id?: string
-          class_id?: string | null
+          grade_section_id?: string | null
           student_id?: string | null
           date?: string
           status?: 'present' | 'absent' | 'late' | 'excused'
@@ -447,6 +447,111 @@ export interface Database {
           parent_message_id?: string | null
           created_at?: string
           updated_at?: string
+        }
+      }
+      grade_sections: {
+        Row: {
+          id: string
+          school_id: string | null
+          grade_level: number
+          section: string
+          name: string
+          description: string | null
+          teacher_id: string | null
+          academic_year: string
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          school_id?: string | null
+          grade_level: number
+          section: string
+          name: string
+          description?: string | null
+          teacher_id?: string | null
+          academic_year: string
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          school_id?: string | null
+          grade_level?: number
+          section?: string
+          name?: string
+          description?: string | null
+          teacher_id?: string | null
+          academic_year?: string
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      homework_announcements: {
+        Row: {
+          id: string
+          grade_section_id: string | null
+          teacher_id: string | null
+          title: string
+          content: string | null
+          homework_date: string
+          subjects: Json
+          pdf_file_id: string | null
+          is_published: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          grade_section_id?: string | null
+          teacher_id?: string | null
+          title: string
+          content?: string | null
+          homework_date: string
+          subjects: Json
+          pdf_file_id?: string | null
+          is_published?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          grade_section_id?: string | null
+          teacher_id?: string | null
+          title?: string
+          content?: string | null
+          homework_date?: string
+          subjects?: Json
+          pdf_file_id?: string | null
+          is_published?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      grade_section_enrollments: {
+        Row: {
+          id: string
+          grade_section_id: string | null
+          student_id: string | null
+          enrolled_at: string
+          status: string | null
+        }
+        Insert: {
+          id?: string
+          grade_section_id?: string | null
+          student_id?: string | null
+          enrolled_at?: string
+          status?: string | null
+        }
+        Update: {
+          id?: string
+          grade_section_id?: string | null
+          student_id?: string | null
+          enrolled_at?: string
+          status?: string | null
         }
       }
     }

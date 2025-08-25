@@ -84,7 +84,17 @@ const authenticateToken = async (req, res, next) => {
     // Get token from header
     const token = req.header('Authorization')?.replace('Bearer ', '');
     
+    // Debug logging for student homework requests
+    if (req.path.includes('/homework') && req.method === 'GET') {
+      console.log('🔐 [AUTH] Student homework request detected');
+      console.log('   📍 Path:', req.path);
+      console.log('   🔑 Token present:', !!token);
+      console.log('   🌐 Origin:', req.headers.origin);
+      console.log('   📱 User agent:', req.headers['user-agent']);
+    }
+    
     if (!token) {
+      console.log('❌ [AUTH] No token provided for homework request');
       return res.status(401).json({
         success: false,
         message: 'No token provided, authorization denied'
@@ -93,6 +103,16 @@ const authenticateToken = async (req, res, next) => {
 
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret');
+    
+    // Debug logging for student homework requests
+    if (req.path.includes('/homework') && req.method === 'GET') {
+      console.log('✅ [AUTH] Token verified successfully');
+      console.log('   👤 Decoded user:', {
+        id: decoded.user?.id || decoded.userId,
+        email: decoded.user?.email || decoded.email,
+        role: decoded.user?.role || decoded.role
+      });
+    }
     
     // Add user to request (minimal verification for performance)
     // Handle both token formats: { user: {...} } and { userId, email, role }

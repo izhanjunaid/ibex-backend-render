@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const router = express.Router();
-const hybridStorage = require('../lib/hybrid-storage');
+const cdnStorage = require('../lib/cdn-storage');
 const { authenticateToken } = require('../middleware/auth');
 
 // Configure multer for file uploads
@@ -138,7 +138,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       relatedId: req.body.relatedId
     };
 
-    const result = await hybridStorage.uploadFile(req.file, options);
+    const result = await cdnStorage.uploadFile(req.file, options);
 
     res.json({
       success: true,
@@ -191,7 +191,7 @@ router.post('/upload-multiple', authenticateToken, upload.array('files', 5), asy
     // Upload files sequentially to avoid overwhelming the system
     for (const file of req.files) {
       try {
-        const result = await hybridStorage.uploadFile(file, options);
+        const result = await cdnStorage.uploadFile(file, options);
         results.push({
           id: result.file.id,
           filename: result.file.filename,
@@ -235,7 +235,7 @@ router.get('/:fileId/download', authenticateToken, async (req, res) => {
     const { fileId } = req.params;
     const expiresIn = parseInt(req.query.expires) || 3600; // 1 hour default
 
-    const result = await hybridStorage.getFileUrl(fileId, req.user.id, expiresIn);
+    const result = await cdnStorage.getFileUrl(fileId, req.user.id, expiresIn);
 
     res.json({
       success: true,
@@ -385,7 +385,7 @@ router.delete('/:fileId', authenticateToken, async (req, res) => {
     }
 
     // Delete from storage provider
-    await hybridStorage.deleteFile(file.file_path, file.storage_provider, file.bucket);
+            await cdnStorage.deleteFile(file.file_path, file.storage_provider, file.bucket);
 
     // Delete from database
     const { error: deleteError } = await supabase
@@ -415,7 +415,7 @@ router.delete('/:fileId', authenticateToken, async (req, res) => {
  */
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
-    const stats = await hybridStorage.getStorageStats(req.user.id);
+    const stats = await cdnStorage.getStorageStats(req.user.id);
 
     res.json({
       success: true,

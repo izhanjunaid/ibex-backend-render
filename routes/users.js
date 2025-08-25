@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const { createClient } = require('@supabase/supabase-js');
 const { auth } = require('../middleware/auth');
-const hybridStorage = require('../lib/hybrid-storage');
+const cdnStorage = require('../lib/cdn-storage');
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -281,7 +281,7 @@ router.delete('/:id', auth, async (req, res) => {
     if (userFiles && userFiles.length > 0) {
       for (const file of userFiles) {
         try {
-          await hybridStorage.deleteFile(file.file_path, file.storage_provider, file.bucket);
+          await cdnStorage.deleteFile(file.file_path, file.storage_provider, file.bucket);
         } catch (err) {
           console.warn('File deletion warn:', err.message);
         }
@@ -371,6 +371,146 @@ router.post('/:id/activate', auth, async (req, res) => {
     res.json({
       message: `User ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`,
       status: newStatus
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * Generate email from first and last name with duplicate handling
+ */
+function generateEmail(firstName, lastName, usedEmails = new Set()) {
+  const cleanFirst = firstName.toLowerCase().replace(/[^a-z]/g, '');
+  const cleanLast = lastName.toLowerCase().replace(/[^a-z]/g, '');
+  
+  let baseEmail;
+  if (cleanLast) {
+    baseEmail = `${cleanFirst}.${cleanLast}@ibex.com`;
+  } else {
+    baseEmail = `${cleanFirst}@ibex.com`;
+  }
+  
+  // Handle duplicates by adding numbers
+  let finalEmail = baseEmail;
+  let counter = 2;
+  
+  while (usedEmails.has(finalEmail)) {
+    finalEmail = `${cleanFirst}.${cleanLast}${counter}@ibex.com`;
+    counter++;
+  }
+  
+  return finalEmail;
+}
+
+// @route   POST /api/users
+// @desc    Create a new user (admin only)
+// @access  Private/Admin
+router.post('/', [
+  auth,
+  [
+    body('first_name').trim().isLength({ min: 2 }).withMessage('First name is required'),
+    body('last_name').trim().isLength({ min: 2 }).withMessage('Last name is required'),
+    body('email').optional().isEmail().withMessage('Email must be valid if provided'),
+    body('role').isIn(['student', 'teacher']).withMessage('Role must be student or teacher'),
+    body('password').optional().isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+    body('grade_section_id').optional().isUUID().withMessage('grade_section_id must be a valid UUID')
+  ]
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin only.' });
+    }
+
+    const {
+      first_name,
+      last_name,
+      email: providedEmail,
+      role,
+      password = 'ibex123',
+      grade_section_id
+    } = req.body;
+
+    // Generate email if not provided
+    let email = providedEmail;
+    if (!email) {
+      // Get existing emails to avoid duplicates
+      const { data: existingUsers } = await supabase
+        .from('users')
+        .select('email');
+      
+      const usedEmails = new Set(existingUsers?.map(u => u.email) || []);
+      email = generateEmail(first_name, last_name, usedEmails);
+    }
+
+    // Check duplicate email
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (existingUser) {
+      return res.status(400).json({ message: 'Email already exists' });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(password, salt);
+
+    // Insert user
+    const { data: newUser, error: insertError } = await supabase
+      .from('users')
+      .insert({
+        first_name,
+        last_name,
+        email,
+        role,
+        status: 'active',
+        password_hash,
+        email_verified: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select('id, first_name, last_name, email, role')
+      .single();
+
+    if (insertError) {
+      console.error('Insert error:', insertError);
+      return res.status(500).json({ message: 'Error creating user' });
+    }
+
+    // If student and grade_section_id provided, enroll student
+    if (role === 'student' && grade_section_id) {
+      const { error: enrollError } = await supabase
+        .from('grade_section_enrollments')
+        .insert({
+          grade_section_id,
+          student_id: newUser.id,
+          status: 'active'
+        });
+      if (enrollError) {
+        console.error('Enrollment error:', enrollError);
+        // Continue but inform
+        return res.status(201).json({
+          message: 'User created but enrollment failed',
+          user: newUser,
+          generated_email: !providedEmail ? email : null,
+          enrollment_error: enrollError.message
+        });
+      }
+    }
+
+    res.status(201).json({
+      message: 'User created successfully',
+      user: newUser,
+      generated_email: !providedEmail ? email : null
     });
   } catch (error) {
     console.error(error);

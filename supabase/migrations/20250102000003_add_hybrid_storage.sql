@@ -11,8 +11,8 @@ CREATE TABLE file_uploads (
     file_size BIGINT NOT NULL,
     content_type VARCHAR(100) NOT NULL,
     
-    -- Hybrid storage fields
-    storage_provider VARCHAR(20) NOT NULL DEFAULT 'supabase', -- 'supabase', 'r2', 'local'
+    -- CDN storage fields
+    storage_provider VARCHAR(20) NOT NULL DEFAULT 'r2', -- 'r2' (CDN only)
     bucket VARCHAR(50) NOT NULL,
     folder VARCHAR(100) DEFAULT 'general',
     
