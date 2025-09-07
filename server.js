@@ -9,10 +9,14 @@ const http = require('http');
 const { createClient } = require('@supabase/supabase-js');
 const Sentry = require('@sentry/node');
 const jwt = require('jsonwebtoken'); // Import jsonwebtoken
+const cacheManager = require('./lib/cache'); // Import the cache manager
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
+
+// Make the cache manager available to all routes and middleware
+app.set('cacheManager', cacheManager);
 
 // Initialize Supabase client
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -424,13 +428,40 @@ app.use('/api/notifications', require('./routes/notifications'));
 // File upload handling
 app.use('/uploads', express.static('uploads'));
 
-// Serve static files from React app in production
+// Serve static files from React app in production (only if client/build exists)
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'client/build')));
+  const clientBuildPath = path.join(__dirname, 'client/build');
+  const indexPath = path.join(clientBuildPath, 'index.html');
   
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
-  });
+  // Check if the client build directory exists
+  if (require('fs').existsSync(clientBuildPath) && require('fs').existsSync(indexPath)) {
+    app.use(express.static(clientBuildPath));
+    
+    app.get('*', (req, res) => {
+      res.sendFile(indexPath);
+    });
+  } else {
+    // If no frontend exists, serve API info
+    app.get('/', (req, res) => {
+      res.json({
+        message: 'EduCore Backend API',
+        status: 'running',
+        version: '1.0.0',
+        endpoints: {
+          health: '/api/health',
+          auth: '/api/auth',
+          users: '/api/users',
+          classes: '/api/classes',
+          attendance: '/api/attendance',
+          homework: '/api/homework',
+          announcements: '/api/announcements',
+          files: '/api/files',
+          notifications: '/api/notifications'
+        },
+        documentation: 'This is a backend-only deployment. Frontend not included.'
+      });
+    });
+  }
 }
 
 // Initialize Sentry for backend error monitoring

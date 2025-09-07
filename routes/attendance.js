@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
 const { createClient } = require('@supabase/supabase-js');
+const { stormEndpointMiddleware, smartCache } = require('../middleware/enhanced-middleware');
+const cacheManager = require('../lib/cache');
 
 // Initialize Supabase client
 const supabaseAdmin = createClient(
@@ -193,50 +195,133 @@ router.post('/bulk-mark', authenticateToken, async (req, res) => {
 
     console.log('✅ [ATTENDANCE] Successfully marked attendance:', result);
     
-    // Send push notifications to students whose attendance was marked
+    // CRITICAL: Invalidate ALL related caches to ensure data consistency
     try {
-      console.log('   📱 Sending push notifications to students...');
+      console.log('   💾 [CACHE] Invalidating all attendance-related caches...');
       
-      // Get grade section name for notifications
-      const { data: gradeSection } = await supabase
-        .from('grade_sections')
-        .select('name')
-        .eq('id', grade_section_id)
-        .single();
+      // Get the singleton cacheManager instance from the app context
+      const cacheManager = req.app.get('cacheManager');
       
-      const gradeSectionName = gradeSection?.name || '';
+      // RECONSTRUCT THE KEY USING THE EXACT SAME METHODS AS THE MIDDLEWARE
+      const today = new Date().toISOString().split('T')[0];
+      const dailyEndpointUrl = `/api/attendance/grade-sections/daily?date=${date}`;
+      const userKey = cacheManager.userKey(user.id, dailyEndpointUrl);
+      const dateKey = cacheManager.dateKey(today, userKey); // This will correctly generate the key with '::' at the end
+
+      const cacheKeysToInvalidate = [
+        // Individual grade section attendance cache
+        `attendance_${grade_section_id}_${date}`,
+        
+        // Daily overview caches (the main issue) - using the guaranteed correct key
+        dateKey,
+        userKey,
+        
+        // Legacy cache keys (just in case they exist from previous versions)
+        `attendance_daily_${date}`,
+        `grade_sections_daily_${date}`,
+
+        // Statistics caches
+        `attendance_stats_${grade_section_id}_${date}`,
+        `attendance_overview_${date}`
+      ];
       
-      // Send notifications for each student whose attendance was marked
-      for (const record of attendance_records) {
-        if (record.status !== 'unmarked') {
-          console.log(`   📱 Sending notification to student ${record.student_id} for status: ${record.status}`);
-          
-          // Call the push notification function
-          await supabase.functions.invoke('push-notifications', {
-            body: {
-              action: 'send-attendance-notification',
-              data: {
-                studentId: record.student_id,
-                status: record.status,
-                date: date,
-                gradeSectionName: gradeSectionName,
-                markedBy: user.id
-              }
-            }
-          });
+      // Invalidate each cache key
+      let invalidatedCount = 0;
+      for (const cacheKey of cacheKeysToInvalidate) {
+        try {
+          const deleted = cacheManager.del(cacheKey);
+          if (deleted) {
+            console.log(`   💾 [CACHE] Invalidated: ${cacheKey}`);
+            invalidatedCount++;
+          }
+        } catch (cacheError) {
+          console.error(`   ⚠️ [CACHE] Failed to invalidate ${cacheKey}:`, cacheError.message);
         }
       }
       
-      console.log('   ✅ Push notifications sent successfully');
-    } catch (notificationError) {
-      console.error('   ⚠️ Error sending push notifications:', notificationError);
-      // Don't fail the attendance marking if notifications fail
+      // Also clear wildcard patterns for comprehensive invalidation
+      try {
+        // Clear all smart cache entries for this date and attendance endpoints
+        // CRITICAL: Use TODAY's date for cache keys, not the requested date
+        const patterns = [
+          `date:${today}:user:*:/api/attendance/grade-sections/daily*`,
+          `user:*:/api/attendance/grade-sections/daily?date=${date}*`,
+          `attendance_daily_${date}*`
+        ];
+        
+        let totalWildcardDeleted = 0;
+        for (const pattern of patterns) {
+          const wildcardDeleted = cacheManager.delPattern ? cacheManager.delPattern(pattern) : 0;
+          totalWildcardDeleted += wildcardDeleted;
+          if (wildcardDeleted > 0) {
+            console.log(`   💾 [CACHE] Cleared ${wildcardDeleted} wildcard caches matching: ${pattern}`);
+          }
+        }
+        
+        if (totalWildcardDeleted > 0) {
+          console.log(`   💾 [CACHE] Total wildcard deletions: ${totalWildcardDeleted}`);
+        }
+      } catch (wildcardError) {
+        console.error('   ⚠️ [CACHE] Wildcard cache clearing failed:', wildcardError.message);
+      }
+      
+      console.log(`   ✅ [CACHE] Successfully invalidated ${invalidatedCount} cache keys`);
+      
+    } catch (cacheInvalidationError) {
+      console.error('   ⚠️ [CACHE] Cache invalidation failed (non-critical):', cacheInvalidationError);
+      // Don't fail the attendance marking if cache invalidation fails
     }
     
+    // Send response immediately - don't wait for push notifications
     res.json({
       message: 'Attendance marked successfully',
       result: result,
       marked_at: new Date().toISOString()
+    });
+    
+    // Send push notifications in the background (async, non-blocking)
+    setImmediate(async () => {
+      try {
+        console.log('   📱 Sending push notifications in background...');
+        
+        // Get grade section name for notifications
+        const { data: gradeSection } = await supabase
+          .from('grade_sections')
+          .select('name')
+          .eq('id', grade_section_id)
+          .single();
+        
+        const gradeSectionName = gradeSection?.name || '';
+        
+        // Collect student IDs for batch notification
+        const studentsToNotify = attendance_records
+          .filter(record => record.status !== 'unmarked')
+          .map(record => record.student_id);
+        
+        if (studentsToNotify.length > 0) {
+          console.log(`   📱 Sending batch notifications to ${studentsToNotify.length} students`);
+          
+          // Use batch notification for better performance
+          await supabase.functions.invoke('push-notifications', {
+            body: {
+              action: 'send-batch-attendance-notifications',
+              data: {
+                grade_section_id: grade_section_id,
+                date: date,
+                student_ids: studentsToNotify,
+                marked_by: user.id
+              }
+            }
+          });
+          
+          console.log('   ✅ Background push notifications sent successfully');
+        } else {
+          console.log('   📱 No students to notify (all unmarked)');
+        }
+      } catch (notificationError) {
+        console.error('   ⚠️ Error sending background push notifications:', notificationError);
+        // Notifications failing shouldn't affect the attendance marking
+      }
     });
   } catch (error) {
     console.error('❌ [ATTENDANCE] Error in bulk mark route:', error);
@@ -433,6 +518,70 @@ router.get('/history', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('❌ [ATTENDANCE] Error in attendance history route:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/attendance/grade-sections/daily?date=YYYY-MM-DD
+ * Get aggregated attendance data for all grade sections for a specific date
+ * Returns: [{gradeSectionId, name, present, absent, late, excused, unmarked, rate, status}]
+ */
+router.get('/grade-sections/daily', 
+  ...stormEndpointMiddleware,
+  authenticateToken, 
+  smartCache({ ttl: 60, varyByUser: true, varyByDate: true }),
+  async (req, res) => {
+  console.log('🔍 [ATTENDANCE] GET /grade-sections/daily - Fetching daily aggregated attendance');
+  console.log('   👤 User:', { id: req.user.id, role: req.user.role, email: req.user.email });
+  console.log('   📝 Query params:', req.query);
+  
+  try {
+    const { user } = req;
+    const { date } = req.query;
+    const supabase = req.supabase;
+
+    if (!date) {
+      console.log('❌ [ATTENDANCE] Missing required parameter: date');
+      return res.status(400).json({ error: 'Missing required parameter: date' });
+    }
+
+    console.log('   📅 Getting aggregated attendance for date:', date);
+
+    // Use the optimized function to get aggregated attendance data
+    const { data: attendanceData, error } = await supabase
+      .rpc('get_daily_attendance_summary', {
+        p_date: date,
+        p_user_id: user.id,
+        p_user_role: user.role
+      });
+
+    if (error) {
+      console.error('❌ [ATTENDANCE] Error fetching daily attendance summary:', error);
+      return res.status(500).json({ error: 'Failed to fetch daily attendance summary' });
+    }
+
+    // Transform to your exact required format
+    const rows = (attendanceData || []).map(item => [
+      item.grade_section_id,
+      item.present_count || 0,
+      item.absent_count || 0,
+      item.late_count || 0,
+      item.excused_count || 0,
+      item.unmarked_count || 0,
+      item.total_students || 0
+    ]);
+
+    console.log('✅ [ATTENDANCE] Successfully fetched aggregated attendance for', rows.length, 'grade sections');
+    
+    res.set('Cache-Control', 'public, max-age=60'); // Cache for 1 minute
+    res.json({
+      date,
+      fields: ["id", "present", "absent", "late", "excused", "unmarked", "total"],
+      rows: rows
+    });
+  } catch (error) {
+    console.error('❌ [ATTENDANCE] Error in daily attendance summary route:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

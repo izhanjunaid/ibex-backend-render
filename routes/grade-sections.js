@@ -3,6 +3,8 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const { authenticateToken } = require('../middleware/auth');
 const { supabaseAdmin } = require('../lib/supabase');
+const { stormEndpointMiddleware, standardEndpointMiddleware, staticEndpointMiddleware, smartCache } = require('../middleware/enhanced-middleware');
+const cacheManager = require('../lib/cache');
 
 // Middleware to inject Supabase client
 router.use((req, res, next) => {
@@ -82,9 +84,68 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/grade-sections/overview
+// Get grade sections overview with today's attendance stats
+router.get('/overview', 
+  ...stormEndpointMiddleware,
+  authenticateToken, 
+  smartCache({ ttl: 60, varyByUser: true, varyByDate: true }),
+  async (req, res) => {
+  console.log('🔍 [GRADE-SECTIONS] GET /overview - Fetching grade sections overview');
+  console.log('   👤 User:', { id: req.user.id, role: req.user.role, email: req.user.email });
+  
+  try {
+    const { user } = req;
+    const supabase = req.supabase;
+    const today = new Date().toISOString().split('T')[0];
+
+    console.log('   📅 Getting overview for date:', today);
+
+    // Get grade sections with today's attendance stats using optimized function
+    const { data: overviewData, error } = await supabase
+      .rpc('get_grade_sections_overview', {
+        p_user_id: user.id,
+        p_user_role: user.role,
+        p_date: today
+      });
+
+    if (error) {
+      console.error('❌ [GRADE-SECTIONS] Error fetching overview:', error);
+      return res.status(500).json({ error: 'Failed to fetch grade sections overview' });
+    }
+
+    // Transform to your exact required format
+    const rows = (overviewData || []).map(item => [
+      item.id,
+      item.name,
+      item.total_students || 0,
+      item.present_count || 0,
+      item.absent_count || 0,
+      item.late_count || 0,
+      item.excused_count || 0,
+      item.unmarked_count || 0
+    ]);
+
+    console.log('✅ [GRADE-SECTIONS] Successfully fetched overview for', rows.length, 'grade sections');
+    
+    res.set('Cache-Control', 'public, max-age=60'); // Cache for 1 minute
+    res.json({
+      date: today,
+      fields: ["id", "name", "student_count", "present", "absent", "late", "excused", "unmarked"],
+      rows: rows
+    });
+  } catch (error) {
+    console.error('❌ [GRADE-SECTIONS] Error in overview route:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/grade-sections/available-teachers
 // Get all teachers available for assignment (MUST be before /:id route)
-router.get('/available-teachers', authenticateToken, async (req, res) => {
+router.get('/available-teachers', 
+  ...staticEndpointMiddleware,
+  authenticateToken, 
+  async (req, res) => {
   console.log('🔍 [GRADE-SECTIONS] GET /available-teachers - Fetching available teachers');
   console.log('   👤 User:', { id: req.user.id, role: req.user.role, email: req.user.email });
   
@@ -622,6 +683,116 @@ router.delete('/:gradeSectionId/enroll/:studentId', authenticateToken, async (re
     res.json({ success: true, message: 'Student removed from grade section' });
   } catch (error) {
     console.error('❌ [GRADE-SECTIONS] Error removing student:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/grade-sections/students/batch
+// Get students for multiple grade sections efficiently
+// Body: { ids: [gradeSectionId1, gradeSectionId2, ...] }
+// Returns: { [gradeSectionId]: [{studentId, firstName, lastName, ...}] }
+router.post('/students/batch', 
+  ...stormEndpointMiddleware,
+  authenticateToken,
+  [
+    body('ids').isArray({ min: 1 }).withMessage('At least one grade section ID is required'),
+    body('ids.*').isUUID().withMessage('All grade section IDs must be valid UUIDs')
+  ],
+  async (req, res) => {
+  console.log('🔍 [GRADE-SECTIONS] POST /students/batch - Fetching students for multiple grade sections');
+  console.log('   👤 User:', { id: req.user.id, role: req.user.role, email: req.user.email });
+  console.log('   📝 Request body:', JSON.stringify(req.body, null, 2));
+  
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    console.log('❌ [GRADE-SECTIONS] Validation errors:', errors.array());
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  try {
+    const { user } = req;
+    const { ids } = req.body;
+    const supabase = req.supabase;
+
+    console.log('   🆔 Grade section IDs to fetch:', ids);
+
+    // Check access permissions for each grade section
+    let accessibleIds = ids;
+    if (user.role === 'teacher') {
+      const { data: teacherSections, error: accessError } = await supabase
+        .from('grade_sections')
+        .select('id')
+        .eq('teacher_id', user.id)
+        .in('id', ids);
+
+      if (accessError) {
+        console.error('❌ [GRADE-SECTIONS] Error checking teacher access:', accessError);
+        return res.status(500).json({ error: 'Failed to verify access' });
+      }
+
+      accessibleIds = teacherSections.map(section => section.id);
+      console.log('   👨‍🏫 Teacher accessible sections:', accessibleIds);
+    } else if (user.role === 'student') {
+      // Students can only see their own enrolled sections
+      const { data: enrollments, error: enrollError } = await supabase
+        .from('grade_section_enrollments')
+        .select('grade_section_id')
+        .eq('student_id', user.id)
+        .eq('status', 'active')
+        .in('grade_section_id', ids);
+
+      if (enrollError) {
+        console.error('❌ [GRADE-SECTIONS] Error checking student enrollments:', enrollError);
+        return res.status(500).json({ error: 'Failed to verify enrollments' });
+      }
+
+      accessibleIds = enrollments.map(enrollment => enrollment.grade_section_id);
+      console.log('   👨‍🎓 Student accessible sections:', accessibleIds);
+    }
+
+    if (accessibleIds.length === 0) {
+      console.log('⚠️ [GRADE-SECTIONS] No accessible grade sections found');
+      res.set('Cache-Control', 'public, max-age=60'); // Cache empty results
+      return res.json({ students: {} });
+    }
+
+    // Get students for all accessible sections using existing function
+    const students = {};
+    
+    // Fetch students for each grade section individually (temporary fix until batch function is available)
+    for (const gradeSectionId of accessibleIds) {
+      try {
+        const { data: sectionStudents, error: sectionError } = await supabase
+          .rpc('get_grade_section_students', {
+            grade_section_uuid: gradeSectionId
+          });
+
+        if (sectionError) {
+          console.error('❌ [GRADE-SECTIONS] Error fetching students for section:', gradeSectionId, sectionError);
+          continue; // Skip this section but continue with others
+        }
+
+        if (sectionStudents && sectionStudents.length > 0) {
+          students[gradeSectionId] = sectionStudents.map(student => ({
+            id: student.student_id,
+            name: `${student.first_name} ${student.last_name}`,
+            status: 'active'
+          }));
+        }
+      } catch (err) {
+        console.error('❌ [GRADE-SECTIONS] Exception fetching students for section:', gradeSectionId, err);
+        continue;
+      }
+    }
+
+    console.log('✅ [GRADE-SECTIONS] Successfully fetched students for', Object.keys(students).length, 'grade sections');
+    
+    res.set('Cache-Control', 'public, max-age=60'); // Cache for 1 minute
+    res.json({
+      students: students
+    });
+  } catch (error) {
+    console.error('❌ [GRADE-SECTIONS] Error in batch students route:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

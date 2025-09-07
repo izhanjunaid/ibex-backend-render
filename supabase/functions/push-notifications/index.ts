@@ -143,6 +143,9 @@ serve(async (req) => {
       case 'send-attendance-notification':
         result = await sendAttendanceNotification(data)
         break
+      case 'send-batch-attendance-notifications':
+        result = await sendBatchAttendanceNotifications(data)
+        break
       default:
         return new Response(
           JSON.stringify({ error: 'Invalid action' }),
@@ -322,6 +325,136 @@ async function sendAttendanceNotification(data: {
     userId: studentId,
     notification
   })
+}
+
+async function sendBatchAttendanceNotifications(data: {
+  grade_section_id: string;
+  date: string;
+  student_ids: string[];
+  marked_by: string;
+}) {
+  const { grade_section_id, date, student_ids, marked_by } = data
+
+  console.log(`🔄 Processing batch attendance notifications for ${student_ids.length} students`)
+
+  // Get grade section details
+  const { data: gradeSection, error: gradeSectionError } = await supabase
+    .from('grade_sections')
+    .select('name')
+    .eq('id', grade_section_id)
+    .single()
+
+  if (gradeSectionError) {
+    console.error('Error fetching grade section:', gradeSectionError)
+    throw new Error('Failed to get grade section details')
+  }
+
+  // Get attendance records for all students
+  const { data: attendanceRecords, error: attendanceError } = await supabase
+    .from('attendance')
+    .select('student_id, status')
+    .eq('grade_section_id', grade_section_id)
+    .eq('date', date)
+    .in('student_id', student_ids)
+
+  if (attendanceError) {
+    console.error('Error fetching attendance records:', attendanceError)
+    throw new Error('Failed to get attendance records')
+  }
+
+  // Get student details for all students
+  const { data: students, error: studentsError } = await supabase
+    .from('users')
+    .select('id, first_name, last_name')
+    .in('id', student_ids)
+
+  if (studentsError) {
+    console.error('Error fetching students:', studentsError)
+    throw new Error('Failed to get student details')
+  }
+
+  // Create a map of student details and attendance status
+  const studentMap = new Map(students.map(s => [s.id, s]))
+  const attendanceMap = new Map(attendanceRecords.map(a => [a.student_id, a.status]))
+
+  const results = []
+  const batchSize = 10 // Process notifications in batches to avoid overwhelming the system
+
+  // Process notifications in batches
+  for (let i = 0; i < student_ids.length; i += batchSize) {
+    const batch = student_ids.slice(i, i + batchSize)
+    const batchPromises = batch.map(async (studentId) => {
+      const student = studentMap.get(studentId)
+      const status = attendanceMap.get(studentId)
+
+      if (!student || !status || status === 'unmarked') {
+        return { studentId, skipped: true, reason: 'No status change or student not found' }
+      }
+
+      try {
+        // Create notification for this student
+        const statusEmoji = {
+          'present': '✅',
+          'absent': '❌', 
+          'late': '⏰',
+          'excused': '📝'
+        }[status] || '📊'
+
+        const statusText = {
+          'present': 'Present',
+          'absent': 'Absent',
+          'late': 'Late',
+          'excused': 'Excused'
+        }[status] || status
+
+        const notification: FCMNotification = {
+          title: `${statusEmoji} Attendance Updated`,
+          body: `Hi ${student.first_name}! Your attendance has been marked as ${statusText} for ${new Date(date).toLocaleDateString()}${gradeSection?.name ? ` in ${gradeSection.name}` : ''}.`,
+          data: {
+            type: 'attendance',
+            student_id: studentId,
+            status: status,
+            date: date,
+            grade_section_name: gradeSection?.name || '',
+            marked_by: marked_by
+          }
+        }
+
+        const result = await sendNotification({
+          userId: studentId,
+          notification
+        })
+
+        return { studentId, success: result.success, result }
+      } catch (error) {
+        console.error(`Error sending notification to student ${studentId}:`, error)
+        return { studentId, success: false, error: error.message }
+      }
+    })
+
+    // Wait for current batch to complete before processing next batch
+    const batchResults = await Promise.all(batchPromises)
+    results.push(...batchResults)
+
+    // Small delay between batches to prevent overwhelming the system
+    if (i + batchSize < student_ids.length) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+  }
+
+  const successCount = results.filter(r => r.success).length
+  const skippedCount = results.filter(r => r.skipped).length
+
+  console.log(`✅ Batch notifications completed: ${successCount} sent, ${skippedCount} skipped, ${results.length - successCount - skippedCount} failed`)
+
+  return {
+    success: true,
+    message: `Batch notifications processed: ${successCount} sent, ${skippedCount} skipped`,
+    total_students: student_ids.length,
+    notifications_sent: successCount,
+    notifications_skipped: skippedCount,
+    results
+  }
 }
 
 async function sendFCMNotification(token: string, notification: FCMNotification): Promise<FCMResponse> {
