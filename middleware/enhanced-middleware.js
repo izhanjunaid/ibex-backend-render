@@ -132,6 +132,15 @@ const normalEndpointMiddleware = [
   compression()
 ];
 
+/**
+ * Static data endpoint middleware (longer cache, no ETag)
+ */
+const staticEndpointMiddleware = [
+  enhancedCORS,
+  stormRateLimit,
+  smartCache({ ttl: 300 }),
+  compressionHints
+];
 
 module.exports = {
   smartCache,
@@ -141,5 +150,6 @@ module.exports = {
   performanceMonitor,
   compressionHints,
   stormEndpointMiddleware,
-  normalEndpointMiddleware
+  normalEndpointMiddleware,
+  staticEndpointMiddleware
 };
